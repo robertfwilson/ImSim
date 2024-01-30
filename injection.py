@@ -219,10 +219,12 @@ class BlendedTimeSeries(TimeSeries):
 class StarTimeSeries(TransitTimeSeries, SeismologyTimeSeries):    
 
     
-    def get_total_lightcurve(self):
-        
-        delta_flux = self.get_transit_lightcurve()
-        delta_flux += self.get_seismology_lightcurve()
+    def get_total_lightcurve(self, get_seismo=True, get_transit=True):
+
+        if get_transit:
+            delta_flux = self.get_transit_lightcurve()
+        if get_seismo:
+            delta_flux += self.get_seismology_lightcurve()
 
         self.d_flux = delta_flux
         

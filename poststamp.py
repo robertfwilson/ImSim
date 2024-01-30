@@ -67,10 +67,10 @@ class TimeSeriesCutout(RomanImage):
 
             delta_mags = target_mag_timeseries[i]
             
-            new_star_cat = update_stellar_catalog(all_stars, delta_mags, mag_col='F146')
+            new_star_cat = update_stellar_catalog(all_stars, delta_mags, mag_col=bandpass)
 
 
-            data, data_err = self.make_realistic_image(oversample=True, bandpass='F146', \
+            data, data_err = self.make_realistic_image(oversample=True, bandpass=bandpass, \
                                                     read_style='cas22_ramp', return_err=True, \
                                                     multiaccum_table=multi_accum, \
                                                     star_list=new_star_cat[:,1:],
@@ -133,6 +133,7 @@ class TimeSeriesCutout(RomanImage):
         #print(flux, flux_err)
 
         lightcurve = {'time':self.star.time, 'psf_flux':flux, 'psf_flux_err':flux_err, 'injected_flux': self.star.d_flux+1.}
+        self.lightcurve = lightcurve
         
         return lightcurve
 
