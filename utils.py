@@ -17,8 +17,8 @@ def matrix_solve(x, y, y_err=None, ):
         A_0 = A
         y_0 = np.vstack(y.ravel())
     else:
-        A_0 = np.vstack((1./y_err).ravel()) * A
-        y_0 = np.vstack( y.ravel() ) * np.vstack((1./y_err).ravel())
+        A_0 = np.vstack((1./(y_err**0.5)).ravel()) * A
+        y_0 = np.vstack( y.ravel() ) * np.vstack((1./(y_err**0.5)).ravel())
         
     w_i = np.linalg.solve(A_0.T.dot(A_0), A_0.T.dot( y_0 ) , )
 

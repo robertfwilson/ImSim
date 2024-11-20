@@ -1,5 +1,6 @@
 import numpy as np
 
+from .rampfit import *
 
 def get_ramp_samples(expected_flux, nreads, readtime=3.04, read_noise=11., 
                      saturation_limit=1e5):
@@ -13,40 +14,44 @@ def get_ramp_samples(expected_flux, nreads, readtime=3.04, read_noise=11.,
     return np.round(reads,0)
 
 
+
 def combine_read_frames_into_resultant_frames(read_frames,multiaccum_table,saturation_limit=1e5):
     
     #group_times=np.arange(1, len(read_frames)+1) * readtime
-    group_frame_fluxes = []
+
+    ngroups = len(multiaccum_table)
+    nframes, nx, ny = np.shape(read_frames)
+
+    group_frame_fluxes = np.zeros(shape=(ngroups, nx, ny))
+
     
-    for groupnum, nframes in enumerate(multiaccum_table):
+    for groupnum, frame_nums in enumerate(multiaccum_table):
         
-        last_frame = sum(multiaccum_table[:groupnum+1])
-        first_frame = sum(multiaccum_table[:groupnum])
-        
-        frames = read_frames[first_frame:last_frame]
+        #last_frame = sum(multiaccum_table[:groupnum+1])
+        #first_frame = sum(multiaccum_table[:groupnum])
+
+        # Subtract off 1 since we don't simulate the pedestal
+        frames = read_frames[np.array(frame_nums)-1]
         
         frames[frames>=saturation_limit] = 1e10
-        
-        group_avg_flux = np.sum(frames,axis=0) 
-        group_avg_flux/=nframes
+
+        if len(frames.shape)==3:
+            group_avg_flux = np.mean(frames,axis=0) 
+        else:
+            group_avg_flux = frames
                 
-        group_frame_fluxes.append(group_avg_flux)
+        group_frame_fluxes[groupnum] = group_avg_flux
     
-    return np.array(group_frame_fluxes)
+    return group_frame_fluxes
 
 
 def get_group_times(multiaccum_table, readtime=3.04):
     
-    frame_times = np.arange(1, sum(multiaccum_table)+1) * readtime
+    group_times = np.zeros(len(multiaccum_table))
     
-    group_times=[]
-    
-    for groupnum, nframes in enumerate(multiaccum_table):
-        last_frame = sum(multiaccum_table[:groupnum+1])
-        first_frame = sum(multiaccum_table[:groupnum])
+    for groupnum, frame_nums in enumerate(multiaccum_table):
+        group_times[groupnum] = np.mean(frame_nums)*readtime
             
-        group_times.append(np.mean(frame_times[first_frame:last_frame]))
-
     return np.array(group_times)
 
 
@@ -284,3 +289,29 @@ def cas22_slope_mean_and_variance(R_i, N_i, t_group, tau_group, read_noise=11.):
     
     return slope , variance
 
+
+
+
+def brandt_rampfit(resultant_frames, multiaccum_table, frametime=3.04, read_noise=11., saturation_limit=1e5):
+
+    nframes, n_x, n_y = resultant_frames.shape
+    read_noise_array = read_noise * np.ones(n_x*n_y)
+
+    # Create covariance matrix object
+    t_group = get_group_times(multiaccum_table, readtime=frametime)
+    ramp_covar = Covar(read_times=t_group, pedestal=True)
+
+
+    # Format the Difference Frames
+    pedestal_frame = resultant_frames[0].reshape(-1)
+    diff_frames = (resultant_frames[1:]-resultant_frames[:-1]).reshape(nframes-1, -1) / ramp_covar.delta_t[:, np.newaxis]
+    diff_frames_w_pedestal = np.append(pedestal_frame, diff_frames).reshape(nframes,-1)
+
+    #Make Saturation mask
+    saturation_mask = (resultant_frames<saturation_limit).reshape(nframes, -1)
+
+    
+    rampfit_result = fit_ramps(diffs=diff_frames_w_pedestal, Cov=ramp_covar, sig=read_noise_array, 
+                           diffs2use=saturation_mask)
+
+    return rampfit_result.countrate.reshape(n_x, n_y), rampfit_result.uncert.reshape(n_x, n_y)

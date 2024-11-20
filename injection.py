@@ -1,15 +1,27 @@
-import batman 
 import pandas as pd
 from tqdm import tqdm
-
 from scipy.interpolate import griddata
+
+try:
+    import batman 
+except ImportError:
+    print('Install batman (https://lkreidberg.github.io/batman/docs/html/installation.html) to use Transiting Planet Functionality')
 
 try:
     from gadfly import StellarOscillatorKernel, Hyperparameters, GaussianProcess, PowerSpectrum
 except ImportError:
     print('Install gadfly (https://gadfly-astro.readthedocs.io) to use Asteroseismology Functionality')
 
+
+
+#try:
+#    from butterpy import StellarOscillatorKernel, Hyperparameters, GaussianProcess, PowerSpectrum
+#except ImportError:
+#    print('Install gadfly (https://gadfly-astro.readthedocs.io) to use Asteroseismology Functionality')
+
+
 from .utils import *
+from astropy.io import fits
 
 msun = 1.9891e30
 rsun = 695500000.0
@@ -117,12 +129,15 @@ class TransitTimeSeries(TimeSeries):
         self.model_params = batman.TransitParams()
         
 
-    def set_stellar_parameters(self, Radius, Mass, Teff, Fe_H=0., Lum=None, Mbol=None):
+    def set_stellar_parameters(self, Radius, Mass, Teff, Fe_H=0., Lum=None, Mbol=None, logg=None):
 
         self.rstar=Radius * u.R_sun
         self.mstar=Mass * u.M_sun
         self.teff=Teff * u.K
-        self.logg = u.Dex((c.G * self.mstar / self.rstar**2).cgs)
+        if logg is None:
+            self.logg = u.Dex((c.G * self.mstar / self.rstar**2).cgs)
+        else:
+            self.logg=logg
         self.met = u.Dex(Fe_H)
 
         if Lum is None:
@@ -157,7 +172,7 @@ class TransitTimeSeries(TimeSeries):
             self.t0=t0
 
 
-    def _calc_batman_parameters(self, n=0):
+    def _calc_batman_parameters(self, n=0, limb_law='quadratic'):
 
         self.model_params.rp = (self.rplanet.to(u.R_sun).value / self.rstar.to(u.R_sun).value)
         self.model_params.per = self.orbital_period.value
@@ -175,17 +190,35 @@ class TransitTimeSeries(TimeSeries):
         self.model_params.inc = np.rad2deg( np.arccos(self.impact /self.model_params.a) )
 
         # Update this to interpolate on a grid later
-        self.model_params.limb_dark = "nonlinear"        #limb darkening model
-        self.model_params.u = self._get_limb_darkening() 
+        self.model_params.limb_dark = limb_law        #limb darkening model
+        self.model_params.u = self._get_limb_darkening(law=limb_law) 
 
 
-    def _get_limb_darkening(self, limbcoeff_interpolator=None):
+    def _get_limb_darkening(self, limbcoeff_interpolator=None, law='quadratic'):
 
         '''
         TODO: Update this so that it gets Limb-Darkening Parameters from the file in data
         '''
 
-        return [1.1233, -1.7547, 1.5448, -0.5273]
+        limb_data = fits.getdata(RIMTIMSIM_DIRECTORY+'/data/limbdark/claret2011_limbdark_'+self.bandpass+'.fits')
+
+        xi = [[self.logg.value, self.teff.value]]
+        points=np.array([limb_data['logg'],limb_data['Teff']]).T
+
+        if law=='quadratic':
+            values = np.array([limb_data['a'],limb_data['b']]).T
+        elif law=='square-root':
+            values = np.array([limb_data['c'],limb_data['d']]).T
+        else:
+            'LIMB DARKENING LAW NOT RECOGNIZED. '
+            return  [1.1233, -1.7547, 1.5448, -0.5273]
+
+        interp_value = griddata(points, values, xi, method='linear')
+
+        if np.isnan(interp_value).any():
+            interp_value = griddata(points, values, xi, method='nearest')
+
+        return interp_value.reshape(2,)
     
     def get_transit_lightcurve(self, ):
 
@@ -206,9 +239,14 @@ class TransitTimeSeries(TimeSeries):
 
 
 
-class DetachedEBTimeSeries(TimeSeries):
+class EBTimeSeries(TimeSeries):
+
+    
 
     pass
+
+
+
 
 
 class BlendedTimeSeries(TimeSeries):
@@ -360,11 +398,19 @@ def calculate_lightcurves(lc_params, tobs=72., cadence=0.0104167):
 
 
 
-def update_stellar_catalog(stellar_catalog, delta_mag, mag_col='mag'):
+def update_stellar_catalog(stellar_catalog, delta_mag, delta_xcol=None, delta_ycol=None, mag_col='mag'):
     
     new_starsdf = stellar_catalog.copy()
     
     new_starsdf[mag_col] = stellar_catalog[mag_col].add(delta_mag, fill_value=0.)
+
+
+    if not(delta_xcol is None):
+        new_starsdf['xcol'] = stellar_catalog['xcol'].add(delta_xcol, fill_value=delta_xcol)
+    if not(delta_ycol is None):
+        new_starsdf['ycol'] = stellar_catalog['ycol'].add(delta_ycol, fill_value=delta_ycol)
+        
+    
     newstars_numpy =  np.append(np.vstack(new_starsdf.index.to_numpy()),
                                 new_starsdf.to_numpy(), axis=1 )
 
